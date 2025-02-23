@@ -1,9 +1,9 @@
-import os, sys
-from typing import Optional, Callable
+import os
+import sys
+from typing import Callable
 from pathlib import Path
 import re
 import subprocess
-import select
 from packaging.requirements import Requirement
 from agentstack import conf, log
 
@@ -21,6 +21,18 @@ RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)
 # site-packages directory; it's possible an environment variable can control this.
 
 
+def _get_python_path() -> str:
+    """Get the correct Python executable path based on platform."""
+    return '.venv/Scripts/python.exe' if sys.platform == 'win32' else '.venv/bin/python'
+
+
+def _get_venv_paths() -> tuple[Path, Path]:
+    """Get virtual environment paths based on platform."""
+    venv_path = conf.PATH / VENV_DIR_NAME.absolute()
+    venv_bin_dir = venv_path / ('Scripts' if sys.platform == 'win32' else 'bin')
+    return venv_path, venv_bin_dir
+
+
 def install(package: str):
     """Install a package with `uv` and add it to pyproject.toml."""
 
@@ -32,10 +44,10 @@ def install(package: str):
 
     def on_error(line: str):
         log.error(f"uv: [error]\n {line.strip()}")
-    
+
     with Spinner(f"Installing {package}") as spinner:
         _wrap_command_with_callbacks(
-            [get_uv_bin(), 'add', '--python', '.venv/bin/python', package],
+            [get_uv_bin(), 'add', '--python', _get_python_path(), package],
             on_progress=on_progress,
             on_error=on_error,
         )
@@ -49,26 +61,41 @@ def install_project():
     def on_progress(line: str):
         if RE_UV_PROGRESS.match(line):
             spinner.clear_and_log(line.strip(), 'info')
+        # Add more detailed logging for dependency installation
+        elif 'Installing' in line or 'Collecting' in line:
+            spinner.clear_and_log(f"📦 {line.strip()}", 'info')
+        elif 'Successfully' in line:
+            spinner.clear_and_log(f"✅ {line.strip()}", 'success')
+        elif 'ERROR' in line.upper() or 'WARNING' in line.upper():
+            spinner.clear_and_log(f"⚠️  {line.strip()}", 'warning')
 
     def on_error(line: str):
-        log.error(f"uv: [error]\n {line.strip()}")
+        log.error(f"UV installation error:\n{line.strip()}")
+        spinner.clear_and_log(f"❌ Installation error: {line.strip()}", 'error')
 
     try:
-        with Spinner(f"Installing project dependencies.") as spinner:
+        with Spinner("Installing project dependencies...") as spinner:
+            spinner.clear_and_log("🔍 Resolving dependencies...", 'info')
             result = _wrap_command_with_callbacks(
-                [get_uv_bin(), 'pip', 'install', '--python', '.venv/bin/python', '.'],
+                [get_uv_bin(), 'pip', 'install', '--python', _get_python_path(), '.'],
                 on_progress=on_progress,
                 on_error=on_error,
             )
             if result is False:
-                spinner.clear_and_log("Retrying uv installation with --no-cache flag...", 'info')
-                _wrap_command_with_callbacks(
-                    [get_uv_bin(), 'pip', 'install', '--no-cache', '--python', '.venv/bin/python', '.'],
+                spinner.clear_and_log(
+                    "⚠️  Initial installation failed, retrying with --no-cache flag...", 'warning'
+                )
+                result = _wrap_command_with_callbacks(
+                    [get_uv_bin(), 'pip', 'install', '--no-cache', '--python', _get_python_path(), '.'],
                     on_progress=on_progress,
                     on_error=on_error,
                 )
+                if result is False:
+                    raise Exception("Installation failed even with --no-cache")
+            else:
+                spinner.clear_and_log("✨ All dependencies installed successfully!", 'success')
     except Exception as e:
-        log.error(f"Installation failed: {str(e)}")
+        log.error(f"❌ Installation failed: {str(e)}")
         raise
 
 
@@ -146,8 +173,11 @@ def get_uv_bin() -> str:
 def _setup_env() -> dict[str, str]:
     """Copy the current environment and add the virtual environment path for use by a subprocess."""
     env = os.environ.copy()
-    env["VIRTUAL_ENV"] = str(conf.PATH / VENV_DIR_NAME.absolute())
+    venv_path, venv_bin_dir = _get_venv_paths()
+
+    env["VIRTUAL_ENV"] = str(venv_path)
     env["UV_INTERNAL__PARENT_INTERPRETER"] = sys.executable
+
     return env
 
 
@@ -161,6 +191,8 @@ def _wrap_command_with_callbacks(
     process = None
     try:
         all_lines = ''
+        log.debug(f"Running command: {' '.join(command)}")
+
         process = subprocess.Popen(
             command,
             cwd=conf.PATH.absolute(),
@@ -171,26 +203,52 @@ def _wrap_command_with_callbacks(
         )
         assert process.stdout and process.stderr  # appease type checker
 
-        readable = [process.stdout, process.stderr]
-        while readable:
-            ready, _, _ = select.select(readable, [], [])
-            for fd in ready:
-                line = fd.readline()
-                if not line:
-                    readable.remove(fd)
+        # Read output with timeout
+        try:
+            while process.poll() is None:
+                try:
+                    stdout, stderr = process.communicate(timeout=1.0)
+                    if stdout:
+                        on_progress(stdout)
+                        all_lines += stdout
+                    if stderr:
+                        on_progress(stderr)
+                        all_lines += stderr
+                except subprocess.TimeoutExpired:
                     continue
+                except Exception as e:
+                    log.error(f"Error reading output: {e}")
+                    break
 
-                on_progress(line)
-                all_lines += line
+            # Get any remaining output
+            stdout, stderr = process.communicate()
+            if stdout:
+                on_progress(stdout)
+                all_lines += stdout
+            if stderr:
+                on_progress(stderr)
+                all_lines += stderr
 
-        if process.wait() == 0:  # return code: success
+        except Exception as e:
+            log.error(f"Error during output reading: {e}")
+            process.kill()
+            raise
+
+        return_code = process.wait()
+        log.debug(f"Process completed with return code: {return_code}")
+
+        if return_code == 0:
             on_complete(all_lines)
             return True
         else:
+            error_msg = f"Process failed with return code {return_code}"
+            log.error(error_msg)
             on_error(all_lines)
             return False
     except Exception as e:
-        on_error(str(e))
+        error_msg = f"Exception running command: {str(e)}"
+        log.error(error_msg)
+        on_error(error_msg)
         return False
     finally:
         if process:
