@@ -59,21 +59,12 @@ def install_project():
     def on_progress(line: str):
         if RE_UV_PROGRESS.match(line):
             spinner.clear_and_log(line.strip(), 'info')
-        # Add more detailed logging for dependency installation
-        elif 'Installing' in line or 'Collecting' in line:
-            spinner.clear_and_log(f"📦 {line.strip()}", 'info')
-        elif 'Successfully' in line:
-            spinner.clear_and_log(f"✅ {line.strip()}", 'success')
-        elif 'ERROR' in line.upper() or 'WARNING' in line.upper():
-            spinner.clear_and_log(f"⚠️  {line.strip()}", 'warning')
 
     def on_error(line: str):
         log.error(f"UV installation error:\n{line.strip()}")
-        spinner.clear_and_log(f"❌ Installation error: {line.strip()}", 'error')
 
     try:
         with Spinner("Installing project dependencies...") as spinner:
-            spinner.clear_and_log("🔍 Resolving dependencies...", 'info')
             result = _wrap_command_with_callbacks(
                 [get_uv_bin(), 'pip', 'install', '--python', PYTHON_EXECUTABLE, '.'],
                 on_progress=on_progress,
@@ -89,7 +80,7 @@ def install_project():
                     on_error=on_error,
                 )
                 if result is False:
-                    raise Exception("Installation failed even with --no-cache")
+                    raise Exception("Installation failed with --no-cache")
             else:
                 spinner.clear_and_log("✨ All dependencies installed successfully!", 'success')
     except Exception as e:
@@ -177,10 +168,8 @@ def get_uv_bin() -> str:
 def _setup_env() -> dict[str, str]:
     """Copy the current environment and add the virtual environment path for use by a subprocess."""
     env = os.environ.copy()
-
     env["VIRTUAL_ENV"] = str(VENV_PATH)
     env["UV_INTERNAL__PARENT_INTERPRETER"] = sys.executable
-
     return env
 
 
@@ -195,19 +184,19 @@ def _wrap_command_with_callbacks(
     process = None
     try:
         all_lines = ''
-        log.debug(f"Running command: {' '.join(command)}")
+        sub_args = {
+            'cwd': conf.PATH.absolute(),
+            'stdout': subprocess.PIPE,
+            'stderr': subprocess.PIPE,
+            'text': True,
+        }
+        if use_venv:
+            sub_args['env'] = _setup_env()
 
-        process = subprocess.Popen(
-            command,
-            cwd=conf.PATH.absolute(),
-            env=_setup_env(),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
+        log.debug(f"Running command: {' '.join(command)}")
+        process = subprocess.Popen(command, **sub_args)  # type: ignore
         assert process.stdout and process.stderr  # appease type checker
 
-        # Read output with timeout
         try:
             while process.poll() is None:
                 try:
