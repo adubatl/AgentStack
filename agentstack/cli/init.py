@@ -1,6 +1,6 @@
-import os
-import sys
+import os, sys
 from typing import Optional
+from pathlib import Path
 import inquirer
 from textwrap import shorten
 
@@ -38,12 +38,12 @@ def require_uv():
 
 def prompt_slug_name() -> str:
     """Prompt the user for a project name."""
-
+    
     def _validate(slug_name: Optional[str]) -> bool:
         if not slug_name:
             log.error("Project name cannot be empty")
             return False
-
+            
         if not is_snake_case(slug_name):
             log.error("Project name must be snake_case")
             return False
@@ -53,12 +53,12 @@ def prompt_slug_name() -> str:
             return False
 
         return True
-
+    
     def _prompt() -> str:
         return inquirer.text(
             message="Project name (snake_case)",
         )
-
+    
     log.info(
         "Provide a project name. This will be used to create a new directory in the "
         "current path and will be used as the project name. 🐍 Must be snake_case."
@@ -66,7 +66,7 @@ def prompt_slug_name() -> str:
     slug_name = None
     while not _validate(slug_name):
         slug_name = _prompt()
-
+    
     assert slug_name  # appease type checker
     return slug_name
 
@@ -148,11 +148,11 @@ def init_project(
 
     if framework is None:
         framework = template_data.framework
-
+    
     if framework in frameworks.ALIASED_FRAMEWORKS:
         framework = frameworks.ALIASED_FRAMEWORKS[framework]
-
-    if framework not in frameworks.SUPPORTED_FRAMEWORKS:
+    
+    if not framework in frameworks.SUPPORTED_FRAMEWORKS:
         raise Exception(f"Framework '{framework}' is not supported.")
     log.info(f"Using framework: {framework}")
 
@@ -163,7 +163,7 @@ def init_project(
     packaging.create_venv()
     log.info("Installing dependencies...")
     packaging.install_project()
-
+    
     if repo.find_parent_repo(conf.PATH):
         # if a repo already exists, we don't want to initialize a new one
         log.info("Found existing git repository; disabling tracking.")
