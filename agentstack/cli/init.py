@@ -1,7 +1,7 @@
 import os
 import sys
 from typing import Optional
-import questionary
+import inquirer
 from textwrap import shorten
 
 from agentstack import conf, log
@@ -54,11 +54,21 @@ def prompt_slug_name() -> str:
 
         return True
 
+    def _prompt() -> str:
+        return inquirer.text(
+            message="Project name (snake_case)",
+        )
+
     log.info(
         "Provide a project name. This will be used to create a new directory in the "
         "current path and will be used as the project name. 🐍 Must be snake_case."
     )
-    return questionary.text("Project name (snake_case)", validate=_validate).ask()
+    slug_name = None
+    while not _validate(slug_name):
+        slug_name = _prompt()
+
+    assert slug_name  # appease type checker
+    return slug_name
 
 
 def select_template(slug_name: str, framework: Optional[str] = None) -> TemplateConfig:
@@ -67,23 +77,16 @@ def select_template(slug_name: str, framework: Optional[str] = None) -> Template
 
     EMPTY = 'empty'
     choices = [
-        questionary.Choice('🆕 Empty Project', EMPTY),
+        (EMPTY, "🆕 Empty Project"),
     ]
     for template in templates:
-        choices.append(
-            questionary.Choice(f"⚡️ {template.name} - {shorten(template.description, 80)}", template.name)
-        )
+        choices.append((template.name, shorten(f"⚡️ {template.name} - {template.description}", 80)))
 
-    template_name = questionary.select(
-        "Do you want to start with a template?",
-        choices=choices,
-        use_indicator=True,
-        use_shortcuts=False,
-        use_jk_keys=False,
-        use_emacs_keys=False,
-        use_arrow_keys=True,
-        use_search_filter=True,
-    ).ask()
+    choice = inquirer.list_input(
+        message="Do you want to start with a template?",
+        choices=[c[1] for c in choices],
+    )
+    template_name = next(c[0] for c in choices if c[1] == choice)
 
     if template_name == EMPTY:
         return TemplateConfig(
