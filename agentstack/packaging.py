@@ -10,7 +10,6 @@ from agentstack import conf, log
 
 
 DEFAULT_PYTHON_VERSION = "3.12"
-VENV_DIR_NAME: Path = Path(".venv")
 
 # filter uv output by these words to only show useful progress messages
 RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)')
@@ -22,6 +21,8 @@ RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)
 # site-packages directory; it's possible an environment variable can control this.
 def _get_executeable_paths():
     """Get environment paths based on platform."""
+    VENV_DIR_NAME = Path(".venv")
+
     python_path = '.venv/Scripts/python.exe' if sys.platform == 'win32' else '.venv/bin/python'
     venv_path = conf.PATH / VENV_DIR_NAME.absolute()
     return venv_path, python_path
