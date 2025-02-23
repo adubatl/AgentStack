@@ -4,6 +4,7 @@ from typing import Callable
 from pathlib import Path
 import re
 import subprocess
+import site
 from packaging.requirements import Requirement
 from agentstack import conf, log
 
@@ -20,6 +21,14 @@ RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)
 # In testing, when this was not set, packages could end up in the pyenv's
 # site-packages directory; it's possible an environment variable can control this.
 
+_python_executable = ".venv/bin/python"
+
+
+def set_python_executable(path: str):
+    global _python_executable
+
+    _python_executable = path
+
 
 def _get_python_path() -> str:
     """Get the correct Python executable path based on platform."""
@@ -35,7 +44,7 @@ def _get_venv_paths() -> tuple[Path, Path]:
 
 def install(package: str):
     """Install a package with `uv` and add it to pyproject.toml."""
-
+    global _python_executable
     from agentstack.cli.spinner import Spinner
 
     def on_progress(line: str):
@@ -55,7 +64,7 @@ def install(package: str):
 
 def install_project():
     """Install all dependencies for the user's project."""
-
+    global _python_executable
     from agentstack.cli.spinner import Spinner
 
     def on_progress(line: str):
@@ -114,13 +123,13 @@ def remove(package: str):
 
     log.info(f"Uninstalling {requirement.name}")
     _wrap_command_with_callbacks(
-        [get_uv_bin(), 'remove', '--python', '.venv/bin/python', requirement.name],
+        [get_uv_bin(), 'remove', '--python', _python_executable, requirement.name],
         on_progress=on_progress,
         on_error=on_error,
     )
 
 
-def upgrade(package: str):
+def upgrade(package: str, use_venv: bool = True):
     """Upgrade a package with `uv`."""
 
     # TODO should we try to update the project's pyproject.toml as well?
@@ -131,11 +140,17 @@ def upgrade(package: str):
     def on_error(line: str):
         log.error(f"uv: [error]\n {line.strip()}")
 
+    extra_args = []
+    if not use_venv:
+        # uv won't let us install without a venv if we don't specify a target
+        extra_args = ['--target', site.getusersitepackages()]
+
     log.info(f"Upgrading {package}")
     _wrap_command_with_callbacks(
-        [get_uv_bin(), 'pip', 'install', '-U', '--python', '.venv/bin/python', package],
+        [get_uv_bin(), 'pip', 'install', '-U', '--python', _python_executable, *extra_args, package],
         on_progress=on_progress,
         on_error=on_error,
+        use_venv=use_venv,
     )
 
 
@@ -186,6 +201,7 @@ def _wrap_command_with_callbacks(
     on_progress: Callable[[str], None] = lambda x: None,
     on_complete: Callable[[str], None] = lambda x: None,
     on_error: Callable[[str], None] = lambda x: None,
+    use_venv: bool = True,
 ) -> bool:
     """Run a command with progress callbacks. Returns bool for cmd success."""
     process = None
