@@ -20,31 +20,20 @@ RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)
 # the packages are installed into the correct virtual environment.
 # In testing, when this was not set, packages could end up in the pyenv's
 # site-packages directory; it's possible an environment variable can control this.
-
-_python_executable = ".venv/bin/python"
-
-
-def set_python_executable(path: str):
-    global _python_executable
-
-    _python_executable = path
-
-
-def _get_python_path() -> str:
-    """Get the correct Python executable path based on platform."""
-    return '.venv/Scripts/python.exe' if sys.platform == 'win32' else '.venv/bin/python'
-
-
-def _get_venv_paths() -> tuple[Path, Path]:
-    """Get virtual environment paths based on platform."""
+def _get_executeable_paths():
+    """Get environment paths based on platform."""
+    python_path = '.venv/Scripts/python.exe' if sys.platform == 'win32' else '.venv/bin/python'
     venv_path = conf.PATH / VENV_DIR_NAME.absolute()
     venv_bin_dir = venv_path / ('Scripts' if sys.platform == 'win32' else 'bin')
-    return venv_path, venv_bin_dir
+    return venv_path, venv_bin_dir, python_path
+
+
+PYTHON_EXECUTABLE, VENV_PATH, VENV_BIN_DIR = _get_executeable_paths()
 
 
 def install(package: str):
     """Install a package with `uv` and add it to pyproject.toml."""
-    global _python_executable
+    global PYTHON_EXECUTABLE
     from agentstack.cli.spinner import Spinner
 
     def on_progress(line: str):
@@ -56,7 +45,7 @@ def install(package: str):
 
     with Spinner(f"Installing {package}") as spinner:
         _wrap_command_with_callbacks(
-            [get_uv_bin(), 'add', '--python', _get_python_path(), package],
+            [get_uv_bin(), 'add', '--python', PYTHON_EXECUTABLE, package],
             on_progress=on_progress,
             on_error=on_error,
         )
@@ -64,7 +53,7 @@ def install(package: str):
 
 def install_project():
     """Install all dependencies for the user's project."""
-    global _python_executable
+    global PYTHON_EXECUTABLE
     from agentstack.cli.spinner import Spinner
 
     def on_progress(line: str):
@@ -86,7 +75,7 @@ def install_project():
         with Spinner("Installing project dependencies...") as spinner:
             spinner.clear_and_log("🔍 Resolving dependencies...", 'info')
             result = _wrap_command_with_callbacks(
-                [get_uv_bin(), 'pip', 'install', '--python', _get_python_path(), '.'],
+                [get_uv_bin(), 'pip', 'install', '--python', PYTHON_EXECUTABLE, '.'],
                 on_progress=on_progress,
                 on_error=on_error,
             )
@@ -95,7 +84,7 @@ def install_project():
                     "⚠️  Initial installation failed, retrying with --no-cache flag...", 'warning'
                 )
                 result = _wrap_command_with_callbacks(
-                    [get_uv_bin(), 'pip', 'install', '--no-cache', '--python', _get_python_path(), '.'],
+                    [get_uv_bin(), 'pip', 'install', '--no-cache', '--python', PYTHON_EXECUTABLE, '.'],
                     on_progress=on_progress,
                     on_error=on_error,
                 )
@@ -123,7 +112,7 @@ def remove(package: str):
 
     log.info(f"Uninstalling {requirement.name}")
     _wrap_command_with_callbacks(
-        [get_uv_bin(), 'remove', '--python', _python_executable, requirement.name],
+        [get_uv_bin(), 'remove', '--python', PYTHON_EXECUTABLE, requirement.name],
         on_progress=on_progress,
         on_error=on_error,
     )
@@ -147,7 +136,7 @@ def upgrade(package: str, use_venv: bool = True):
 
     log.info(f"Upgrading {package}")
     _wrap_command_with_callbacks(
-        [get_uv_bin(), 'pip', 'install', '-U', '--python', _python_executable, *extra_args, package],
+        [get_uv_bin(), 'pip', 'install', '-U', '--python', PYTHON_EXECUTABLE, *extra_args, package],
         on_progress=on_progress,
         on_error=on_error,
         use_venv=use_venv,
@@ -188,9 +177,8 @@ def get_uv_bin() -> str:
 def _setup_env() -> dict[str, str]:
     """Copy the current environment and add the virtual environment path for use by a subprocess."""
     env = os.environ.copy()
-    venv_path, venv_bin_dir = _get_venv_paths()
 
-    env["VIRTUAL_ENV"] = str(venv_path)
+    env["VIRTUAL_ENV"] = str(VENV_PATH)
     env["UV_INTERNAL__PARENT_INTERPRETER"] = sys.executable
 
     return env
@@ -270,5 +258,5 @@ def _wrap_command_with_callbacks(
         if process:
             try:
                 process.terminate()
-            except:
-                pass
+            except Exception as e:
+                log.error(f"Error terminating process: {e}")
