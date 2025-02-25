@@ -1,4 +1,4 @@
-import os, sys
+import os
 import unittest
 from parameterized import parameterized
 from pathlib import Path
@@ -6,7 +6,6 @@ import shutil
 from cli_test_utils import run_cli
 from agentstack import conf
 from agentstack import frameworks
-from agentstack.cli import init_project
 from agentstack.templates import get_all_templates
 
 BASE_PATH = Path(__file__).parent
@@ -15,10 +14,16 @@ BASE_PATH = Path(__file__).parent
 class CLIInitTest(unittest.TestCase):
     def setUp(self):
         self.framework = os.getenv('TEST_FRAMEWORK')
-        self.project_dir = Path(BASE_PATH / 'tmp' / self.framework / 'test_cli_init')
-        os.chdir(BASE_PATH)  # Change to parent directory first
+        self.project_dir = BASE_PATH / 'tmp' / self.framework / 'test_repo'
+        os.chdir(str(BASE_PATH))  # Change directory before cleanup to avoid Windows file locks
+
+        # Clean up any existing test directory
+        if self.project_dir.exists():
+            shutil.rmtree(self.project_dir, ignore_errors=True)
+
         os.makedirs(self.project_dir, exist_ok=True)
-        os.chdir(self.project_dir)
+        os.chdir(self.project_dir)  # gitpython needs a cwd
+
         # Force UTF-8 encoding for the test environment
         os.environ['PYTHONIOENCODING'] = 'utf-8'
 
@@ -38,7 +43,10 @@ class CLIInitTest(unittest.TestCase):
         if framework != self.framework:
             self.skipTest(f"{alias} is not related to this framework")
 
-        conf.set_path(self.project_dir)  # set working dir, init adds `slug_name`
-        init_project(slug_name='test_project', template='empty', framework=alias)
+        result = run_cli('init', 'test_project', '--template', 'empty', '--framework', alias)
+        self.assertEqual(result.returncode, 0)
+
+        # Verify the framework was set correctly
+        conf.set_path(self.project_dir / 'test_project')
         config = conf.ConfigFile()
-        assert config.framework == framework
+        self.assertEqual(config.framework, framework)
