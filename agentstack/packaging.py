@@ -10,7 +10,7 @@ from agentstack import conf, log
 
 
 DEFAULT_PYTHON_VERSION = "3.12"
-VENV_DIR_NAME = Path(".venv")
+VENV_DIR_NAME: Path = Path(".venv")
 
 # filter uv output by these words to only show useful progress messages
 RE_UV_PROGRESS = re.compile(r'^(Resolved|Prepared|Installed|Uninstalled|Audited)')
