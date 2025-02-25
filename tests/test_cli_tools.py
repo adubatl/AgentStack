@@ -1,5 +1,4 @@
-import subprocess
-import os, sys
+import os
 import unittest
 from parameterized import parameterized
 from pathlib import Path
@@ -15,12 +14,22 @@ from inquirer.errors import ValidationError
 BASE_PATH = Path(__file__).parent
 TEMPLATE_NAME = "empty"
 
+
 class CLIToolsTest(unittest.TestCase):
     def setUp(self):
         self.framework = os.getenv('TEST_FRAMEWORK')
-        self.project_dir = BASE_PATH / 'tmp' / self.framework / 'cli_tools'
+        self.project_dir = BASE_PATH / 'tmp' / self.framework / 'test_repo'
+        os.chdir(str(BASE_PATH))  # Change directory before cleanup to avoid Windows file locks
+
+        # Clean up any existing test directory
+        if self.project_dir.exists():
+            shutil.rmtree(self.project_dir, ignore_errors=True)
+
         os.makedirs(self.project_dir, exist_ok=True)
-        os.chdir(self.project_dir)
+        os.chdir(self.project_dir)  # gitpython needs a cwd
+
+        # Force UTF-8 encoding for the test environment
+        os.environ['PYTHONIOENCODING'] = 'utf-8'
 
     def tearDown(self):
         shutil.rmtree(self.project_dir, ignore_errors=True)
@@ -133,8 +142,8 @@ class CLIToolsTest(unittest.TestCase):
         # Create agent
         run_cli('generate', 'agent', 'test_agent', '--llm', 'openai/gpt-4')
 
-        # Test various invalid names
-        invalid_names = ['TestTool', 'test-tool', 'test tool']
+        # Quote the space-containing name (for win)
+        invalid_names = ['TestTool', 'test-tool', '"test tool"']
         for name in invalid_names:
             result = run_cli('tools', 'new', name)
             self.assertNotEqual(result.returncode, 0)
