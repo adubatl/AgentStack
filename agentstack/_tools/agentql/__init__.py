@@ -8,12 +8,18 @@ API_TIMEOUT_SECONDS = 900
 
 API_KEY = os.getenv("AGENTQL_API_KEY")
 
-def query_data(url: str, query: Optional[str], prompt: Optional[str]) -> dict:
+
+def extract_data(
+    url: str,
+    query: Optional[str],
+    prompt: Optional[str],
+    is_stealth_mode_enabled: bool = False,
+) -> dict:
     """
     url: url of website to scrape
     query: described below
     prompt: Natural language description of the data you want to scrape
-
+    is_stealth_mode_enabled: Enable stealth mode for web scraping (default: False)
 
     AgentQL query to scrape the url.
 
@@ -47,12 +53,16 @@ def query_data(url: str, query: Optional[str], prompt: Optional[str]) -> dict:
     payload = {
         "url": url,
         "query": query,
-        "prompt": prompt
+        "prompt": prompt,
+        "metadata": {
+            "experimental_stealth_mode_enabled": is_stealth_mode_enabled,
+        },
     }
 
     headers = {
         "X-API-Key": f"{API_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "X-TF-Request-Origin": "agentstack",
     }
 
     try:
@@ -60,18 +70,24 @@ def query_data(url: str, query: Optional[str], prompt: Optional[str]) -> dict:
             QUERY_DATA_ENDPOINT,
             headers=headers,
             json=payload,
-            timeout=API_TIMEOUT_SECONDS
+            timeout=API_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
 
     except httpx.HTTPStatusError as e:
         response = e.response
         if response.status_code in [401, 403]:
-            raise ValueError("Please, provide a valid API Key. You can create one at https://dev.agentql.com.") from e
+            raise ValueError(
+                "Please, provide a valid API Key. You can create one at https://dev.agentql.com."
+            ) from e
         else:
             try:
                 error_json = response.json()
-                msg = error_json["error_info"] if "error_info" in error_json else error_json["detail"]
+                msg = (
+                    error_json["error_info"]
+                    if "error_info" in error_json
+                    else error_json["detail"]
+                )
             except (ValueError, TypeError):
                 msg = f"HTTP {e}."
             raise ValueError(msg) from e
